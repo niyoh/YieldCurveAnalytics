@@ -103,42 +103,54 @@ def bootstrap_libor3m():
     # deposit with spot 3m libor rate
     helpers = [DepositRateHelper(QuoteHandle(SimpleQuote(0.47957 / 100)),
                                  Period(3, Months), 1, UnitedStates(), Following, False, Actual360())]
-    # 3m libor futures
-    libor3m = USDLibor(Period(3, Months))
-    helpers += [FuturesRateHelper(QuoteHandle(SimpleQuote(100 - rate)), # 100 - rate    # SimpleQuote(px)
-                                  start, end, Actual360()) # , QuoteHandle(SimpleQuote(conv))
-                for (start, end, rate) in [
-                    # (Date(15, 6, 2022), 0.63984), (Date(21, 9, 2022), 1.15379), (Date(21, 12, 2022), 1.52214),
-                    # (Date(15, 3, 2023), 1.82514), (Date(21, 6, 2023), 2.00235), (Date(20, 9, 2023), 2.16911)
 
+    libor3m = USDLibor(Period(3, Months))
+
+    # 3m libor futures (works)
+    helpers += [FuturesRateHelper(QuoteHandle(SimpleQuote(100 - rate)),
+                                  start, end, Actual360())
+                for (start, end, rate) in [
                     (Date(16, 3, 2022), Date(15, 6, 2022), 0.63984342),
                     (Date(15, 6, 2022), Date(21, 9, 2022), 1.153788538),
                     (Date(21, 9, 2022), Date(21, 12, 2022), 1.522141044),
                     (Date(21, 12, 2022), Date(15, 3, 2023), 1.825137242),
                     (Date(15, 3, 2023), Date(21, 6, 2023), 2.00235),
                     (Date(21, 6, 2023), Date(20, 9, 2023), 2.16911)
-
-                    # (Date(16, 3, 2022), Date(15, 6, 2022), 99.36, -0.00016),
-                    # (Date(15, 6, 2022), Date(21, 9, 2022), 98.845, -0.00121),
-                    # (Date(21, 9, 2022), Date(21, 12, 2022), 98.475, -0.00286),
-                    # (Date(21, 12, 2022), Date(15, 3, 2023), 98.17, -0.00765),
-                    # (Date(15, 3, 2023), Date(21, 6, 2023), 97.99, -0.01089),
-                    # (Date(21, 6, 2023), Date(20, 9, 2023), 97.82, -0.01089)
                 ]]
+
+    # 3m libor futures (bad)
+    # helpers += [FuturesRateHelper(QuoteHandle(SimpleQuote(px)), start, 3,
+    #                               UnitedStates(), Following, False, Actual360(),
+    #                               QuoteHandle(SimpleQuote(conv)), Futures.IMM)
+    #             for (start, px, conv) in [
+    #                 (Date(16, 3, 2022), 99.36, -0.00016),
+    #                 (Date(15, 6, 2022), 98.845, -0.00121),
+    #                 (Date(21, 9, 2022), 98.475, -0.00286),
+    #                 (Date(21, 12, 2022), 98.17, -0.00765),
+    #                 (Date(15, 3, 2023), 97.99, -0.01089),
+    #                 (Date(21, 6, 2023), 97.82, -0.01089)
+    #             ]]
+
+    # 3m libor FRA
+    # libor3m = USDLibor(Period(3, Months))
+    # helpers += [FraRateHelper(QuoteHandle(SimpleQuote(rate / 100)), monthToStart, libor3m)
+    #             for (monthToStart, rate) in [
+    #                 (1, 0.671), (2, 0.845), (3, 1.021), (4, 1.161), (5, 1.279), (6, 1.382)
+    #             ]]
 
     # swaps
     spread = QuoteHandle()  # spread = 0
     fwdStart = Period(0, Days)
-    helpers += [SwapRateHelper(QuoteHandle(SimpleQuote(rate / 100)), Period(tenor, Years), TARGET(),
-                               Annual, Unadjusted, Thirty360(Thirty360.USA), libor3m, spread, fwdStart)
+    helpers += [SwapRateHelper(QuoteHandle(SimpleQuote(rate / 100)), Period(tenor, Years), UnitedStates(),
+                               Semiannual, Following, Thirty360(Thirty360.BondBasis), libor3m, spread, fwdStart)
                 for tenor, rate in [
-                    (2, 1.6599), (3, 1.8155), (4, 1.8675), (5, 1.9018), (6, 1.9253), (7, 1.94975),
+                    (2, 1.65990001), (3, 1.815499544), (4, 1.867499948), (5, 1.9017995), (6, 1.925300002), (7, 1.94975),
                     (8, 1.97), (9, 1.987), (10, 2.00675), (11, 2.025), (12, 2.0452), (15, 2.107),
                     (20, 2.107), (25, 2.0843), (30, 2.0524), (40, 1.9333), (50, 1.82925)
                 ]]
 
     # discount curve
-    libor3m_curve = PiecewiseLinearZero(1, UnitedStates(), helpers, Actual360())
+    libor3m_curve = PiecewiseLogLinearDiscount(Date(22, 2, 2022), helpers, Actual365Fixed())
     libor3m_curve.enableExtrapolation()
     print('reference date: ', libor3m_curve.referenceDate())
 
@@ -154,7 +166,7 @@ def bootstrap_libor3m():
     # discount factors
     libor3m_discounts_instr = [(d, libor3m_curve.discount(d)) for d in libor3m_curve.dates()]
     print(pd.DataFrame(libor3m_discounts_instr))
-
+    pd.DataFrame(libor3m_discounts_instr).to_clipboard()
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
