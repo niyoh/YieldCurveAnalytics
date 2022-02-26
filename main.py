@@ -97,12 +97,12 @@ def bootstrap_eonia():
     print('quarterly -> annual: ', eonia_curve_zero_rate_eq)
 
 
-def bootstrap_libor3m():
+def libor3m_Feb18(discount_curve_handle=None):
     Settings.instance().evaluationDate = Date(18, 2, 2022)
 
     # deposit with spot 3m libor rate
     helpers = [DepositRateHelper(QuoteHandle(SimpleQuote(0.47957 / 100)),
-                                 Period(3, Months), 1, UnitedStates(), Following, False, Actual360())]
+                                 Period(3, Months), 2, UnitedStates(), Following, False, Actual360())]
 
     libor3m = USDLibor(Period(3, Months))
 
@@ -118,31 +118,20 @@ def bootstrap_libor3m():
                     (Date(21, 6, 2023), Date(20, 9, 2023), 2.16911)
                 ]]
 
-    # 3m libor futures (bad)
-    # helpers += [FuturesRateHelper(QuoteHandle(SimpleQuote(px)), start, 3,
-    #                               UnitedStates(), Following, False, Actual360(),
-    #                               QuoteHandle(SimpleQuote(conv)), Futures.IMM)
-    #             for (start, px, conv) in [
-    #                 (Date(16, 3, 2022), 99.36, -0.00016),
-    #                 (Date(15, 6, 2022), 98.845, -0.00121),
-    #                 (Date(21, 9, 2022), 98.475, -0.00286),
-    #                 (Date(21, 12, 2022), 98.17, -0.00765),
-    #                 (Date(15, 3, 2023), 97.99, -0.01089),
-    #                 (Date(21, 6, 2023), 97.82, -0.01089)
-    #             ]]
-
-    # 3m libor FRA
-    # libor3m = USDLibor(Period(3, Months))
-    # helpers += [FraRateHelper(QuoteHandle(SimpleQuote(rate / 100)), monthToStart, libor3m)
-    #             for (monthToStart, rate) in [
-    #                 (1, 0.671), (2, 0.845), (3, 1.021), (4, 1.161), (5, 1.279), (6, 1.382)
-    #             ]]
-
     # swaps
     spread = QuoteHandle()  # spread = 0
     fwdStart = Period(0, Days)
-    helpers += [SwapRateHelper(QuoteHandle(SimpleQuote(rate / 100)), Period(tenor, Years), UnitedStates(),
-                               Semiannual, Following, Thirty360(Thirty360.BondBasis), libor3m, spread, fwdStart)
+
+    def swapRateHelper(rate, tenor, discount_curve_handle):
+        if discount_curve_handle is None:
+            return SwapRateHelper(QuoteHandle(SimpleQuote(rate / 100)), Period(tenor, Years), UnitedStates(),
+                                  Semiannual, Following, Thirty360(Thirty360.BondBasis), libor3m, spread, fwdStart)
+        else:
+            return SwapRateHelper(QuoteHandle(SimpleQuote(rate / 100)), Period(tenor, Years), UnitedStates(),
+                                  Semiannual, Following, Thirty360(Thirty360.BondBasis), libor3m, spread, fwdStart,
+                                  discount_curve_handle)
+
+    helpers += [swapRateHelper(rate, tenor, discount_curve_handle)
                 for tenor, rate in [
                     (2, 1.65990001), (3, 1.815499544), (4, 1.867499948), (5, 1.9017995), (6, 1.925300002), (7, 1.94975),
                     (8, 1.97), (9, 1.987), (10, 2.00675), (11, 2.025), (12, 2.0452), (15, 2.107),
@@ -150,8 +139,15 @@ def bootstrap_libor3m():
                 ]]
 
     # discount curve
-    libor3m_curve = PiecewiseLogLinearDiscount(Date(22, 2, 2022), helpers, Actual365Fixed())
+    libor3m_curve = PiecewiseLogLinearDiscount(Date(22, 2, 2022), helpers,
+                                               Actual365Fixed())  # use referenceDate=Feb22 to match BBG. but why not Feb23
     libor3m_curve.enableExtrapolation()
+
+    return libor3m_curve
+
+
+def bootstrap_libor3m_Feb18():
+    libor3m_curve = libor3m_Feb18()
     print('reference date: ', libor3m_curve.referenceDate())
 
     # plot forward curve
@@ -168,6 +164,193 @@ def bootstrap_libor3m():
     print(pd.DataFrame(libor3m_discounts_instr))
     pd.DataFrame(libor3m_discounts_instr).to_clipboard()
 
+
+def sofr_Feb18():
+    Settings.instance().evaluationDate = Date(18, 2, 2022)
+
+    # deposit with overnight sofr rate
+    helpers = [
+        DepositRateHelper(QuoteHandle(SimpleQuote(rate / 100)),
+                          Period(1, Days), fixingDays,
+                          UnitedStates(), Following, False, Actual360())
+        for rate, fixingDays in [(0.05, 2)]
+    ]
+    sofr = Sofr()
+
+    # swaps
+    helpers += [OISRateHelper(2, Period(*tenor),
+                              QuoteHandle(SimpleQuote(rate / 100)), sofr)
+                for rate, tenor in [
+                    (0.06, (1, Weeks)),
+                    (0.06, (2, Weeks)),
+                    (0.063, (3, Weeks)),
+                    (0.122, (1, Months)), (0.24925, (2, Months)), (0.34425, (3, Months)), (0.43865, (4, Months)),
+                    (0.533, (5, Months)), (0.615, (6, Months)), (0.6825, (7, Months)), (0.755, (8, Months)),
+                    (0.819, (9, Months)), (0.8796, (10, Months)), (0.93935, (11, Months)), (0.994, (12, Months)),
+                    (1.261, (18, Months)),
+                    (1.4345, (2, Years)),
+                    (1.5704, (3, Years))
+                ]]
+
+    # discount curve
+    sofr_curve_c = PiecewiseLogLinearDiscount(Date(23, 2, 2022), helpers, Actual365Fixed())
+    sofr_curve_c.enableExtrapolation()
+
+    return sofr_curve_c
+
+
+def bootstrap_sofr_Feb18():
+    sofr_curve_c = sofr_Feb18()
+    print('reference date: ', sofr_curve_c.referenceDate())
+
+    reference_date = sofr_curve_c.referenceDate()
+    print(reference_date)
+
+    # discount factors
+    sofr_discounts_instr = [(d, sofr_curve_c.discount(d)) for d in sofr_curve_c.dates()]
+    print(pd.DataFrame(sofr_discounts_instr))
+    pd.DataFrame(sofr_discounts_instr).to_clipboard()
+
+
+def dual_curve_bootstrap_Feb18():
+    sofr_curve = sofr_Feb18()
+    discount_curve_handle = RelinkableYieldTermStructureHandle()
+    discount_curve_handle.linkTo(sofr_curve)
+    libor3m_curve = libor3m_Feb18(discount_curve_handle)
+    print('reference date: ', libor3m_curve.referenceDate())
+
+    # discount factors
+    libor3m_discounts_instr = [(d, libor3m_curve.discount(d)) for d in libor3m_curve.dates()]
+    print(pd.DataFrame(libor3m_discounts_instr))
+    pd.DataFrame(libor3m_discounts_instr).to_clipboard()
+
+
+def sofr_Feb25():
+    Settings.instance().evaluationDate = Date(25, 2, 2022)
+
+    # deposit with overnight sofr rate
+    helpers = [
+        DepositRateHelper(QuoteHandle(SimpleQuote(rate / 100)),
+                          Period(1, Days), fixingDays,
+                          UnitedStates(), Following, False, Actual360())
+        for rate, fixingDays in [(0.05, 2)]
+    ]
+    sofr = Sofr()
+
+    # swaps
+    helpers += [OISRateHelper(2, Period(*tenor),
+                              QuoteHandle(SimpleQuote(rate / 100)), sofr)
+                for rate, tenor in [
+                    (0.0533, (1, Weeks)),
+                    (0.0547, (2, Weeks)),
+                    (0.1275, (3, Weeks)),
+                    (0.2066, (1, Months)), (0.2872, (2, Months)), (0.404, (3, Months)), (0.49505, (4, Months)),
+                    (0.5791, (5, Months)), (0.65995, (6, Months)), (0.7299, (7, Months)), (0.7935, (8, Months)),
+                    (0.865, (9, Months)), (0.93525, (10, Months)), (0.99535, (11, Months)), (1.0483, (12, Months)),
+                    (1.3475, (18, Months)),
+                    (1.5291, (2, Years)), (1.6578, (3, Years)), (1.687, (4, Years)), (1.702, (5, Years)),
+                    (1.71785, (6, Years)), (1.7346, (7, Years)), (1.75065, (8, Years)), (1.76415, (9, Years)),
+                    (1.78025, (10, Years)), (1.81225, (12, Years)), (1.8445, (15, Years)), (1.86175, (20, Years)),
+                    (1.83475, (25, Years)), (1.79725, (30, Years)), (1.679, (40, Years)), (1.523, (50, Years))
+                ]]
+
+    # discount curve
+    sofr_curve_c = PiecewiseLogLinearDiscount(Date(1, 3, 2022), helpers, Actual365Fixed())
+    sofr_curve_c.enableExtrapolation()
+
+    return sofr_curve_c
+
+
+def bootstrap_sofr_Feb25():
+    sofr_curve_c = sofr_Feb25()
+    print('reference date: ', sofr_curve_c.referenceDate())
+
+    reference_date = sofr_curve_c.referenceDate()
+    print(reference_date)
+
+    # discount factors
+    sofr_discounts_instr = [(d, sofr_curve_c.discount(d)) for d in sofr_curve_c.dates()]
+    print(pd.DataFrame(sofr_discounts_instr))
+    pd.DataFrame(sofr_discounts_instr).to_clipboard()
+
+
+def libor3m_Feb25(discount_curve_handle=None):
+    Settings.instance().evaluationDate = Date(25, 2, 2022)
+
+    # deposit with spot 3m libor rate
+    helpers = [DepositRateHelper(QuoteHandle(SimpleQuote(0.523 / 100)),
+                                 Period(3, Months), 2, UnitedStates(), Following, False, Actual360())]
+
+    libor3m = USDLibor(Period(3, Months))
+
+    # 3m libor futures (works)
+    helpers += [FuturesRateHelper(QuoteHandle(SimpleQuote(100 - rate)),
+                                  start, end, Actual360())
+                for (start, end, rate) in [
+                    (Date(16, 3, 2022), Date(15, 6, 2022), 0.6724),
+                    (Date(15, 6, 2022), Date(21, 9, 2022), 1.19394),
+                    (Date(21, 9, 2022), Date(21, 12, 2022), 1.59242),
+                    (Date(21, 12, 2022), Date(15, 3, 2023), 1.93555),
+                    (Date(15, 3, 2023), Date(21, 6, 2023), 2.13294),
+                    (Date(21, 6, 2023), Date(20, 9, 2023), 2.3049)
+                ]]
+
+    # swaps
+    spread = QuoteHandle()  # spread = 0
+    fwdStart = Period(0, Days)
+
+    def swapRateHelper(rate, tenor, discount_curve_handle):
+        if discount_curve_handle is None:
+            return SwapRateHelper(QuoteHandle(SimpleQuote(rate / 100)), Period(tenor, Years), UnitedStates(),
+                                  Semiannual, Following, Thirty360(Thirty360.BondBasis), libor3m, spread, fwdStart)
+        else:
+            return SwapRateHelper(QuoteHandle(SimpleQuote(rate / 100)), Period(tenor, Years), UnitedStates(),
+                                  Semiannual, Following, Thirty360(Thirty360.BondBasis), libor3m, spread, fwdStart,
+                                  discount_curve_handle)
+
+    helpers += [swapRateHelper(rate, tenor, discount_curve_handle)
+                for tenor, rate in [
+                    (2, 1.76185), (3, 1.9055), (4, 1.9427), (5, 1.96145), (6, 1.9815), (7, 1.99865),
+                    (8, 2.01635), (9, 2.03085), (10, 2.048), (11, 2.06375), (12, 2.08115), (15, 2.1143),
+                    (20, 2.133), (25, 2.107), (30, 2.0697), (40, 1.9508), (50, 1.856)
+                ]]
+
+    # discount curve
+    libor3m_curve = PiecewiseLogLinearDiscount(Date(1, 3, 2022), helpers, Actual365Fixed())
+    libor3m_curve.enableExtrapolation()
+
+    return libor3m_curve
+
+
+def bootstrap_libor3m_Feb25():
+    libor3m_curve = libor3m_Feb25()
+    print('reference date: ', libor3m_curve.referenceDate())
+
+    # discount factors
+    libor3m_discounts_instr = [(d, libor3m_curve.discount(d)) for d in libor3m_curve.dates()]
+    print(pd.DataFrame(libor3m_discounts_instr))
+    pd.DataFrame(libor3m_discounts_instr).to_clipboard()
+
+
+def dual_curve_bootstrap_Feb25():
+    sofr_curve = sofr_Feb25()
+    discount_curve_handle = RelinkableYieldTermStructureHandle()
+    discount_curve_handle.linkTo(sofr_curve)
+    libor3m_curve = libor3m_Feb25(discount_curve_handle)
+    print('reference date: ', libor3m_curve.referenceDate())
+
+    # discount factors
+    libor3m_discounts_instr = [(d, libor3m_curve.discount(d)) for d in libor3m_curve.dates()]
+    print(pd.DataFrame(libor3m_discounts_instr))
+    pd.DataFrame(libor3m_discounts_instr).to_clipboard()
+
+
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    bootstrap_libor3m()
+    # bootstrap_sofr_Feb18()
+    # bootstrap_libor3m_Feb18()
+    # dual_curve_bootstrap_Feb18()
+
+    # bootstrap_sofr_Feb25()
+    # bootstrap_libor3m_Feb25()
+    dual_curve_bootstrap_Feb25()
