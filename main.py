@@ -97,7 +97,9 @@ def bootstrap_eonia():
     print('quarterly -> annual: ', eonia_curve_zero_rate_eq)
 
 
-def libor3m_Feb18(discount_curve_handle=None):
+# Feb 18
+
+def _bootstrap_libor3m_Feb18(discount_curve_handle=None):
     Settings.instance().evaluationDate = Date(18, 2, 2022)
 
     # deposit with spot 3m libor rate
@@ -147,7 +149,7 @@ def libor3m_Feb18(discount_curve_handle=None):
 
 
 def bootstrap_libor3m_Feb18():
-    libor3m_curve = libor3m_Feb18()
+    libor3m_curve = _bootstrap_libor3m_Feb18()
     print('reference date: ', libor3m_curve.referenceDate())
 
     # plot forward curve
@@ -165,7 +167,7 @@ def bootstrap_libor3m_Feb18():
     pd.DataFrame(libor3m_discounts_instr).to_clipboard()
 
 
-def sofr_Feb18():
+def _bootstrap_sofr_Feb18():
     Settings.instance().evaluationDate = Date(18, 2, 2022)
 
     # deposit with overnight sofr rate
@@ -200,7 +202,7 @@ def sofr_Feb18():
 
 
 def bootstrap_sofr_Feb18():
-    sofr_curve_c = sofr_Feb18()
+    sofr_curve_c = _bootstrap_sofr_Feb18()
     print('reference date: ', sofr_curve_c.referenceDate())
 
     reference_date = sofr_curve_c.referenceDate()
@@ -213,10 +215,10 @@ def bootstrap_sofr_Feb18():
 
 
 def dual_curve_bootstrap_Feb18():
-    sofr_curve = sofr_Feb18()
+    sofr_curve = _bootstrap_sofr_Feb18()
     discount_curve_handle = RelinkableYieldTermStructureHandle()
     discount_curve_handle.linkTo(sofr_curve)
-    libor3m_curve = libor3m_Feb18(discount_curve_handle)
+    libor3m_curve = _bootstrap_libor3m_Feb18(discount_curve_handle)
     print('reference date: ', libor3m_curve.referenceDate())
 
     # discount factors
@@ -225,7 +227,9 @@ def dual_curve_bootstrap_Feb18():
     pd.DataFrame(libor3m_discounts_instr).to_clipboard()
 
 
-def sofr_Feb25():
+# Feb 25
+
+def _bootstrap_sofr_Feb25():
     Settings.instance().evaluationDate = Date(25, 2, 2022)
 
     # deposit with overnight sofr rate
@@ -262,7 +266,7 @@ def sofr_Feb25():
 
 
 def bootstrap_sofr_Feb25():
-    sofr_curve_c = sofr_Feb25()
+    sofr_curve_c = _bootstrap_sofr_Feb25()
     print('reference date: ', sofr_curve_c.referenceDate())
 
     reference_date = sofr_curve_c.referenceDate()
@@ -274,7 +278,7 @@ def bootstrap_sofr_Feb25():
     pd.DataFrame(sofr_discounts_instr).to_clipboard()
 
 
-def libor3m_Feb25(discount_curve_handle=None):
+def _bootstrap_libor3m_Feb25(discount_curve_handle=None):
     Settings.instance().evaluationDate = Date(25, 2, 2022)
 
     # deposit with spot 3m libor rate
@@ -323,26 +327,73 @@ def libor3m_Feb25(discount_curve_handle=None):
 
 
 def bootstrap_libor3m_Feb25():
-    libor3m_curve = libor3m_Feb25()
+    libor3m_curve = _bootstrap_libor3m_Feb25()
     print('reference date: ', libor3m_curve.referenceDate())
 
     # discount factors
     libor3m_discounts_instr = [(d, libor3m_curve.discount(d)) for d in libor3m_curve.dates()]
     print(pd.DataFrame(libor3m_discounts_instr))
     pd.DataFrame(libor3m_discounts_instr).to_clipboard()
+
+
+def _dual_curve_bootstrap_Feb25():
+    sofr_curve = _bootstrap_sofr_Feb25()
+    discount_curve_handle = RelinkableYieldTermStructureHandle()
+    discount_curve_handle.linkTo(sofr_curve)
+    libor3m_curve = _bootstrap_libor3m_Feb25(discount_curve_handle)
+
+    return libor3m_curve
 
 
 def dual_curve_bootstrap_Feb25():
-    sofr_curve = sofr_Feb25()
-    discount_curve_handle = RelinkableYieldTermStructureHandle()
-    discount_curve_handle.linkTo(sofr_curve)
-    libor3m_curve = libor3m_Feb25(discount_curve_handle)
+    libor3m_curve = _dual_curve_bootstrap_Feb25()
     print('reference date: ', libor3m_curve.referenceDate())
 
     # discount factors
     libor3m_discounts_instr = [(d, libor3m_curve.discount(d)) for d in libor3m_curve.dates()]
     print(pd.DataFrame(libor3m_discounts_instr))
     pd.DataFrame(libor3m_discounts_instr).to_clipboard()
+
+
+def check_calibration_fit_Feb25():
+    # discount curve
+    sofr_curve_handle = YieldTermStructureHandle(_bootstrap_sofr_Feb25())
+
+    # forward term structure (forecast)
+    libor3m_curve_handle = YieldTermStructureHandle(_dual_curve_bootstrap_Feb25())
+
+    # price a calibration instrument, expecting ~0 NPV
+    # (e.g. 2Y swap with 1.76185% fixed rate)
+    calendar = UnitedStates()
+    settle_date = Date(1, 3, 2022)
+    maturity_date = Date(1, 3, 2024)
+
+    fixed_leg_tenor = Period(6, Months)
+    fixed_schedule = Schedule(settle_date, maturity_date,
+                              fixed_leg_tenor, calendar,
+                              ModifiedFollowing, ModifiedFollowing,
+                              DateGeneration.Forward, False)
+
+    float_leg_tenor = Period(3, Months)
+    float_schedule = Schedule(settle_date, maturity_date,
+                              float_leg_tenor, calendar,
+                              ModifiedFollowing, ModifiedFollowing,
+                              DateGeneration.Forward, False)
+
+    notional = 10000000
+    fixed_rate = 1.76185 / 100
+    fixed_leg_daycount = Thirty360(Thirty360.BondBasis)
+    float_spread = 0
+    float_leg_daycount = Actual360()
+
+    ir_swap = VanillaSwap(VanillaSwap.Payer, notional, fixed_schedule,
+                          fixed_rate, fixed_leg_daycount, float_schedule,
+                          USDLibor(Period(3, Months), libor3m_curve_handle), float_spread, float_leg_daycount)
+
+    swap_engine = DiscountingSwapEngine(sofr_curve_handle)
+    ir_swap.setPricingEngine(swap_engine)
+
+    print(ir_swap.NPV())
 
 
 # Press the green button in the gutter to run the script.
@@ -353,4 +404,5 @@ if __name__ == '__main__':
 
     # bootstrap_sofr_Feb25()
     # bootstrap_libor3m_Feb25()
-    dual_curve_bootstrap_Feb25()
+    # dual_curve_bootstrap_Feb25()
+    check_calibration_fit_Feb25()
