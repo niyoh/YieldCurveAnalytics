@@ -1,31 +1,7 @@
 from QuantLib import *
 import pandas as pd
 import matplotlib.pyplot as plt
-
-
-def print_hi(name):
-    date = Date(31, 3, 2015)
-    print(date)
-
-    effective_date = Date(1, 1, 2015)
-    termination_date = Date(1, 1, 2016)
-    tenor = Period(Monthly)
-    calendar = TARGET()
-    business_convention = Following
-    date_generation = DateGeneration.Forward
-    end_of_month = False
-
-    schedule = Schedule(effective_date,
-                        termination_date,
-                        tenor,
-                        calendar,
-                        business_convention,
-                        business_convention,
-                        date_generation,
-                        end_of_month)
-    print(Calendar)
-
-    interest_rate = InterestRate(0.05, ActualActual(), Compounded, Annual)
+import datetime
 
 
 def bootstrap_eonia():
@@ -273,9 +249,11 @@ def bootstrap_sofr_Feb25():
     print(reference_date)
 
     # discount factors
+    print('====== sofr discount factors Feb25 =====')
     sofr_discounts_instr = [(d, sofr_curve_c.discount(d)) for d in sofr_curve_c.dates()]
     print(pd.DataFrame(sofr_discounts_instr))
     pd.DataFrame(sofr_discounts_instr).to_clipboard()
+    print()
 
 
 def _bootstrap_libor3m_Feb25(discount_curve_handle=None):
@@ -331,9 +309,11 @@ def bootstrap_libor3m_Feb25():
     print('reference date: ', libor3m_curve.referenceDate())
 
     # discount factors
+    print('====== libor3m discount factors (raw) Feb25 =====')
     libor3m_discounts_instr = [(d, libor3m_curve.discount(d)) for d in libor3m_curve.dates()]
     print(pd.DataFrame(libor3m_discounts_instr))
     pd.DataFrame(libor3m_discounts_instr).to_clipboard()
+    print()
 
 
 def _dual_curve_bootstrap_Feb25():
@@ -350,9 +330,29 @@ def dual_curve_bootstrap_Feb25():
     print('reference date: ', libor3m_curve.referenceDate())
 
     # discount factors
+    print('====== libor3m discount factors (sofr ois discounted) Feb25 =====')
     libor3m_discounts_instr = [(d, libor3m_curve.discount(d)) for d in libor3m_curve.dates()]
     print(pd.DataFrame(libor3m_discounts_instr))
     pd.DataFrame(libor3m_discounts_instr).to_clipboard()
+    print()
+
+
+def compare_libor3m_single_dual_forward_rates_Feb25():
+    libor3m_single_curve = _bootstrap_libor3m_Feb25()
+    libor3m_dual_curve = _dual_curve_bootstrap_Feb25()
+
+    start = libor3m_single_curve.referenceDate() + Period(9, Years)
+    end = start + Period(10, Years)
+    dates = [Date(serial) for serial in range(start.serialNumber(), end.serialNumber() + 1)]
+    libor3m_rates = [
+        (datetime.datetime(d.year(), d.month(), d.dayOfMonth()),
+         libor3m_single_curve.forwardRate(d, UnitedStates().advance(d, 3, Months), Actual360(), Simple).rate() * 100,
+         libor3m_dual_curve.forwardRate(d, UnitedStates().advance(d, 3, Months), Actual360(), Simple).rate() * 100)
+        for d in dates]
+    libor3m_rates = list(zip(*libor3m_rates))
+    plt.plot(libor3m_rates[0], libor3m_rates[1], 'r')
+    plt.plot(libor3m_rates[0], libor3m_rates[2], 'g')
+    plt.show()
 
 
 def check_calibration_fit_Feb25():
@@ -393,7 +393,53 @@ def check_calibration_fit_Feb25():
     swap_engine = DiscountingSwapEngine(sofr_curve_handle)
     ir_swap.setPricingEngine(swap_engine)
 
-    print(ir_swap.NPV())
+    print('===== check calibration fit Feb25 =====')
+    print('par swap rate: ', ir_swap.fairRate() * 100, '%')
+    print('npv: ', ir_swap.NPV())
+    print()
+
+
+def price_2y_imm_swap_Feb25():
+    # discount curve
+    sofr_curve_handle = YieldTermStructureHandle(_bootstrap_sofr_Feb25())
+
+    # forward term structure (forecast)
+    libor3m_curve_handle = YieldTermStructureHandle(_dual_curve_bootstrap_Feb25())
+
+    # IMM 2Y swap at market level of 1.8157% fixed rate
+    calendar = UnitedStates()
+    effective_date = Date(16, 3, 2022)
+    maturity_date = Date(20, 3, 2024)
+
+    fixed_leg_tenor = Period(6, Months)
+    fixed_schedule = Schedule(effective_date, maturity_date,
+                              fixed_leg_tenor, calendar,
+                              ModifiedFollowing, ModifiedFollowing,
+                              DateGeneration.Forward, False)
+
+    float_leg_tenor = Period(3, Months)
+    float_schedule = Schedule(effective_date, maturity_date,
+                              float_leg_tenor, calendar,
+                              ModifiedFollowing, ModifiedFollowing,
+                              DateGeneration.Forward, False)
+
+    notional = 10000000
+    fixed_rate = 1.8157 / 100
+    fixed_leg_daycount = Thirty360(Thirty360.BondBasis)
+    float_spread = 0
+    float_leg_daycount = Actual360()
+
+    ir_swap = VanillaSwap(VanillaSwap.Payer, notional, fixed_schedule,
+                          fixed_rate, fixed_leg_daycount, float_schedule,
+                          USDLibor(Period(3, Months), libor3m_curve_handle), float_spread, float_leg_daycount)
+
+    swap_engine = DiscountingSwapEngine(sofr_curve_handle)
+    ir_swap.setPricingEngine(swap_engine)
+
+    print('===== price forward starting 2y imm swap Feb25 =====')
+    print('par swap rate: ', ir_swap.fairRate() * 100, '%')
+    print('npv: ', ir_swap.NPV())
+    print()
 
 
 # Press the green button in the gutter to run the script.
@@ -405,4 +451,7 @@ if __name__ == '__main__':
     # bootstrap_sofr_Feb25()
     # bootstrap_libor3m_Feb25()
     # dual_curve_bootstrap_Feb25()
-    check_calibration_fit_Feb25()
+
+    # check_calibration_fit_Feb25()
+    # price_2y_imm_swap_Feb25()
+    compare_libor3m_single_dual_forward_rates_Feb25()
