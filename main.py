@@ -406,6 +406,8 @@ def price_2y_imm_swap_Feb25():
     # forward term structure (forecast)
     libor3m_curve_handle = YieldTermStructureHandle(_dual_curve_bootstrap_Feb25())
 
+    Settings.instance().evaluationDate = Date(25, 2, 2022)
+
     # IMM 2Y swap at market level of 1.8157% fixed rate
     calendar = UnitedStates()
     effective_date = Date(16, 3, 2022)
@@ -415,13 +417,13 @@ def price_2y_imm_swap_Feb25():
     fixed_schedule = Schedule(effective_date, maturity_date,
                               fixed_leg_tenor, calendar,
                               ModifiedFollowing, ModifiedFollowing,
-                              DateGeneration.Forward, False)
+                              DateGeneration.ThirdWednesday, False)
 
     float_leg_tenor = Period(3, Months)
     float_schedule = Schedule(effective_date, maturity_date,
                               float_leg_tenor, calendar,
                               ModifiedFollowing, ModifiedFollowing,
-                              DateGeneration.Forward, False)
+                              DateGeneration.ThirdWednesday, False)
 
     notional = 10000000
     fixed_rate = 1.8157 / 100
@@ -439,7 +441,223 @@ def price_2y_imm_swap_Feb25():
     print('===== price forward starting 2y imm swap Feb25 =====')
     print('par swap rate: ', ir_swap.fairRate() * 100, '%')
     print('npv: ', ir_swap.NPV())
+    print('cv01: ', ir_swap.fixedLegBPS())
     print()
+
+    print('fixed_schedule: ', fixed_schedule.dates())
+    x = fixed_schedule.dates()
+    discount_factors = [(sofr_curve_handle.discount(x[i + 1]) * fixed_leg_daycount.yearFraction(x[i], x[i + 1]))
+                        for i, date in enumerate(x[:-1])]
+    import numpy as np
+    print('cv01 (verify): ', np.array(discount_factors).sum() * notional / 10000)  # 10000 for bps
+
+
+# EUR Apr 14
+
+def _bootstrap_euribor6m_Apr14(discount_curve_handle=None):
+    Settings.instance().evaluationDate = Date(14, 4, 2022)
+
+    euribor6m = Euribor6M()
+    print(euribor6m, ': fixing days: ', euribor6m.fixingDays())
+
+    # deposit with spot 6m euribor rate
+    helpers = [DepositRateHelper(QuoteHandle(SimpleQuote(-0.317 / 100)),
+                                 Period(6, Months), 2, TARGET(), ModifiedFollowing, False, Actual360())]
+
+    # 6m euribor FRAs
+    # helpers += [FraRateHelper(QuoteHandle(SimpleQuote(rate / 100)), startMonth, euribor6m)
+    helpers += [FraRateHelper(QuoteHandle(SimpleQuote(rate / 100)), startMonth, startMonth + 6, euribor6m.fixingDays(),
+                              TARGET(), ModifiedFollowing, True, Actual360())
+                for (startMonth, rate) in [
+                    (1, -0.235), (2, -0.133), (3, -0.2), (4, 0.08), (5, 0.212), (6, 0.385),
+                    (7, 0.514), (8, 0.66), (9, 0.818), (10, 0.96), (11, 1.091), (12, 1.191)
+                ]]
+
+    # swaps
+    spread = QuoteHandle()  # spread = 0
+    fwdStart = Period(0, Days)
+
+    def swapRateHelper(rate, tenor, discount_curve_handle):
+        if discount_curve_handle is None:
+            return SwapRateHelper(QuoteHandle(SimpleQuote(rate / 100)), Period(tenor, Years), TARGET(),
+                                  Semiannual, Following, Thirty360(Thirty360.European), euribor6m, spread, fwdStart)
+        else:
+            return SwapRateHelper(QuoteHandle(SimpleQuote(rate / 100)), Period(tenor, Years), TARGET(),
+                                  Semiannual, Following, Thirty360(Thirty360.European), euribor6m, spread, fwdStart,
+                                  discount_curve_handle)
+
+    helpers += [swapRateHelper(rate, tenor, discount_curve_handle)
+                for tenor, rate in [
+                    (2, 0.7075), (3, 1.024), (4, 1.182), (5, 1.283), (6, 1.348), (7, 1.407),
+                    (8, 1.4645), (9, 1.52475), (10, 1.573), (11, 1.6202), (12, 1.653), (15, 1.704),
+                    (20, 1.628), (25, 1.508), (30, 1.393), (40, 1.242), (50, 1.122)
+                ]]
+
+    # discount curve
+    curve_start_date = euribor6m.fixingCalendar().advance(Settings.instance().evaluationDate, euribor6m.fixingDays(),
+                                                          Days)
+    print('curve_start_date: ', curve_start_date)
+    euribor6m_curve = PiecewiseLogLinearDiscount(curve_start_date, helpers, Thirty360(Thirty360.European))
+    euribor6m_curve.enableExtrapolation()
+
+    return euribor6m_curve
+
+
+def bootstrap_euribor6m_Apr14():
+    euribor6m_curve = _bootstrap_euribor6m_Apr14()
+    print('reference date: ', euribor6m_curve.referenceDate())
+
+    # plot forward curve
+    # today = euribor6m_curve.referenceDate()
+    # end = today + Period(5, Years)
+    # dates = [Date(serial) for serial in range(today.serialNumber(), end.serialNumber() + 1)]
+    # euribor6m_rates = [euribor6m_curve.forwardRate(d, TARGET().advance(d, 3, Months), Actual360(), Simple).rate() * 100
+    #                  for d in dates]
+    # plt.plot(euribor6m_rates)
+    # plt.show()
+
+    # discount factors
+    euribor6m_discounts_instr = [(d, euribor6m_curve.discount(d)) for d in euribor6m_curve.dates()]
+    print(pd.DataFrame(euribor6m_discounts_instr))
+    pd.DataFrame(euribor6m_discounts_instr).to_clipboard()
+
+
+def _bootstrap_estr_Apr14():
+    # evaluation date = Apr14
+    # ESTR holiday: Apr15, Apr18
+    # curve start date = Apr20
+    # deposit / swap settlement: T+2
+
+    Settings.instance().evaluationDate = Date(14, 4, 2022)
+
+    estr = Estr()
+
+    print(estr, ': fixing days: ', estr.fixingDays())
+    print(estr, ': fixing calendar: ', estr.fixingCalendar())
+    print(estr, ': day convention: ', estr.businessDayConvention())
+
+    # deposit with overnight estr rate
+    # (apply same deposit rate over today, TN, ON)
+    helpers = [
+        DepositRateHelper(QuoteHandle(SimpleQuote(rate / 100)),
+                          Period(1, Days), fixingDays,
+                          estr.fixingCalendar(), Following, False, Actual360())
+        for rate, fixingDays in [(-0.586, 0), (-0.586, 1), (-0.586, 2)]
+    ]
+
+    # swaps
+    helpers += [OISRateHelper(2, Period(*tenor),
+                              QuoteHandle(SimpleQuote(rate / 100)), estr)
+                for rate, tenor in [
+                    (-0.577, (1, Weeks)),
+                    (-0.5769, (2, Weeks)),
+                    (-0.575, (1, Months)), (-0.5725, (2, Months)), (-0.5635, (3, Months)),
+                    (-0.5315, (4, Months)),
+                    (-0.505, (5, Months)), (-0.4635, (6, Months)), (-0.4205, (7, Months)),
+                    (-0.3855, (8, Months)),
+                    (-0.3358, (9, Months)), (-0.279, (10, Months)), (-0.226, (11, Months)),
+                    (-0.163, (12, Months)),
+                    (0.2045, (18, Months)),
+                    (0.484, (2, Years)), (0.774, (3, Years)), (0.918, (4, Years)),
+                    (1.006, (5, Years)), (1.067, (6, Years)), (1.129, (7, Years)),
+                    (1.1878, (8, Years)), (1.248899519, (9, Years)), (1.306249976, (10, Years)),
+                    (1.357649982, (11, Years)), (1.400349975, (12, Years)), (1.487150013, (15, Years)),
+                    (1.471650004, (20, Years)), (1.390299976, (25, Years)), (1.306200027, (30, Years)),
+                    (1.194999456, (40, Years)), (1.104000032, (50, Years))
+                ]]
+
+    # discount curve
+    estr_curve_c = PiecewiseLogLinearDiscount(Date(20, 4, 2022), helpers, Actual365Fixed())
+    estr_curve_c.enableExtrapolation()
+
+    return estr_curve_c
+
+
+def bootstrap_estr_Apr14():
+    estr_curve_c = _bootstrap_estr_Apr14()
+    print('reference date: ', estr_curve_c.referenceDate())
+
+    reference_date = estr_curve_c.referenceDate()
+    print(reference_date)
+
+    # discount factors
+    estr_discounts_instr = [(d, estr_curve_c.discount(d)) for d in estr_curve_c.dates()]
+    print(pd.DataFrame(estr_discounts_instr))
+    pd.DataFrame(estr_discounts_instr).to_clipboard()
+
+
+def _dual_curve_bootstrap_eur_Apr14():
+    estr_curve = _bootstrap_estr_Apr14()
+    discount_curve_handle = RelinkableYieldTermStructureHandle()
+    discount_curve_handle.linkTo(estr_curve)
+    euribor6m_curve = _bootstrap_euribor6m_Apr14(discount_curve_handle)
+
+    return euribor6m_curve
+
+
+def dual_curve_bootstrap_eur_Apr14():
+    euribor6m_curve = _dual_curve_bootstrap_eur_Apr14()
+    print('reference date: ', euribor6m_curve.referenceDate())
+
+    # discount factors
+    print('====== euribor6m discount factors (estr ois discounted) Apr14 =====')
+    euribor6m_discounts_instr = [(d, euribor6m_curve.discount(d)) for d in euribor6m_curve.dates()]
+    print(pd.DataFrame(euribor6m_discounts_instr))
+    pd.DataFrame(euribor6m_discounts_instr).to_clipboard()
+    print()
+
+
+def price_13y_eur_swap_Apr14():
+    # discount curve
+    sofr_curve_handle = YieldTermStructureHandle(_bootstrap_estr_Apr14())
+
+    # forward term structure (forecast)
+    euribor6m_curve_handle = YieldTermStructureHandle(_dual_curve_bootstrap_eur_Apr14())
+
+    Settings.instance().evaluationDate = Date(14, 4, 2022)
+
+    # 13Y swap at market level of 1.6795% fixed rate
+    calendar = UnitedStates()
+    effective_date = Date(20, 4, 2022)
+    maturity_date = Date(22, 4, 2035)
+
+    fixed_leg_tenor = Period(12, Months)
+    fixed_schedule = Schedule(effective_date, maturity_date,
+                              fixed_leg_tenor, calendar,
+                              ModifiedFollowing, ModifiedFollowing,
+                              DateGeneration.Forward, False)
+
+    float_leg_tenor = Period(6, Months)
+    float_schedule = Schedule(effective_date, maturity_date,
+                              float_leg_tenor, calendar,
+                              ModifiedFollowing, ModifiedFollowing,
+                              DateGeneration.Forward, False)
+
+    notional = 10000000
+    fixed_rate = 1.6795 / 100
+    fixed_leg_daycount = Thirty360(Thirty360.European)
+    float_spread = 0
+    float_leg_daycount = Actual360()
+
+    ir_swap = VanillaSwap(VanillaSwap.Payer, notional, fixed_schedule,
+                          fixed_rate, fixed_leg_daycount, float_schedule,
+                          Euribor(Period(6, Months), euribor6m_curve_handle), float_spread, float_leg_daycount)
+
+    swap_engine = DiscountingSwapEngine(sofr_curve_handle)
+    ir_swap.setPricingEngine(swap_engine)
+
+    print('===== price forward starting 13y swap Apr14 =====')
+    print('par swap rate: ', ir_swap.fairRate() * 100, '%')
+    print('npv: ', ir_swap.NPV())
+    print('cv01: ', ir_swap.fixedLegBPS())
+    print()
+
+    print('fixed_schedule: ', fixed_schedule.dates())
+    x = fixed_schedule.dates()
+    discount_factors = [(sofr_curve_handle.discount(x[i + 1]) * fixed_leg_daycount.yearFraction(x[i], x[i + 1]))
+                        for i, date in enumerate(x[:-1])]
+    import numpy as np
+    print('cv01 (verify): ', np.array(discount_factors).sum() * notional / 10000)  # 10000 for bps
 
 
 # Press the green button in the gutter to run the script.
@@ -454,4 +672,9 @@ if __name__ == '__main__':
 
     # check_calibration_fit_Feb25()
     # price_2y_imm_swap_Feb25()
-    compare_libor3m_single_dual_forward_rates_Feb25()
+    # compare_libor3m_single_dual_forward_rates_Feb25()
+
+    bootstrap_estr_Apr14()
+    # bootstrap_euribor6m_Apr14()
+    dual_curve_bootstrap_eur_Apr14()
+    price_13y_eur_swap_Apr14()
