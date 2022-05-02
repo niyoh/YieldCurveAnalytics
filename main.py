@@ -660,6 +660,73 @@ def price_13y_eur_swap_Apr14():
     print('cv01 (verify): ', np.array(discount_factors).sum() * notional / 10000)  # 10000 for bps
 
 
+# GBP Apr 14
+
+def _single_curve_bootstrap_sonia_Apr14():
+    Settings.instance().evaluationDate = Date(14, 4, 2022)
+
+    sonia = Sonia()
+    print(sonia, ': fixing days: ', sonia.fixingDays())
+
+    # deposit with spot 1d sonia rate
+    helpers = [DepositRateHelper(QuoteHandle(SimpleQuote(0.6908 / 100)),
+                                 Period(1, Days), 0, sonia.fixingCalendar(), sonia.businessDayConvention(), False,
+                                 sonia.dayCounter())]
+
+    # swaps
+    spread = QuoteHandle()  # spread = 0
+    fwdStart = Period(0, Days)
+
+    def swapRateHelper(rate, tenor, periodUnit):
+        # single curve bootstrapping
+        return SwapRateHelper(QuoteHandle(SimpleQuote(rate / 100)), Period(tenor, periodUnit), sonia.fixingCalendar(),
+                              Annual, sonia.businessDayConvention(), sonia.dayCounter(), sonia, spread, fwdStart)
+
+    helpers += [swapRateHelper(rate, tenor, Weeks)
+                for tenor, rate in [
+                    (1, 0.6905), (2, 0.6906)
+                ]]
+    helpers += [swapRateHelper(rate, tenor, Months)
+                for tenor, rate in [
+                    (1, 0.7980), (2, 0.8957), (3, 1.0060), (4, 1.0976), (5, 1.1824), (6, 1.2759),
+                    (7, 1.3561), (8, 1.4310), (9, 1.5154), (10, 1.5832), (11, 1.6475), (18, 2.0184)
+                ]]
+    helpers += [swapRateHelper(rate, tenor, Years)
+                for tenor, rate in [
+                    (1, 1.7155), (2, 2.1637), (3, 2.1970), (4, 2.1600), (5, 2.1160), (6, 2.0600), (7, 2.0120),
+                    (8, 1.9760), (9, 1.9520), (10, 1.9380), (12, 1.9104), (15, 1.8700),
+                    (20, 1.8103), (25, 1.7620), (30, 1.7210), (40, 1.6318), (50, 1.5415)
+                ]]
+
+    # discount curve
+    curve_start_date = sonia.fixingCalendar().advance(Settings.instance().evaluationDate, sonia.fixingDays(),
+                                                      Days)
+    print('curve_start_date: ', curve_start_date)
+    euribor6m_curve = PiecewiseLogLinearDiscount(curve_start_date, helpers, Actual365Fixed())
+    euribor6m_curve.enableExtrapolation()
+
+    return euribor6m_curve
+
+
+def single_curve_bootstrap_sonia_Apr14():
+    sonia_curve = _single_curve_bootstrap_sonia_Apr14()
+    print('reference date: ', sonia_curve.referenceDate())
+
+    # plot forward curve
+    # today = sonia_curve.referenceDate()
+    # end = today + Period(5, Years)
+    # dates = [Date(serial) for serial in range(today.serialNumber(), end.serialNumber() + 1)]
+    # sonia_rates = [euribor6m_curve.forwardRate(d, TARGET().advance(d, 3, Months), Actual360(), Simple).rate() * 100
+    #                  for d in dates]
+    # plt.plot(sonia_rates)
+    # plt.show()
+
+    # discount factors
+    euribor6m_discounts_instr = [(d, sonia_curve.discount(d)) for d in sonia_curve.dates()]
+    print(pd.DataFrame(euribor6m_discounts_instr))
+    pd.DataFrame(euribor6m_discounts_instr).to_clipboard()
+
+
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     # bootstrap_sofr_Feb18()
@@ -674,7 +741,9 @@ if __name__ == '__main__':
     # price_2y_imm_swap_Feb25()
     # compare_libor3m_single_dual_forward_rates_Feb25()
 
-    bootstrap_estr_Apr14()
+    # bootstrap_estr_Apr14()
     # bootstrap_euribor6m_Apr14()
-    dual_curve_bootstrap_eur_Apr14()
-    price_13y_eur_swap_Apr14()
+    # dual_curve_bootstrap_eur_Apr14()
+    # price_13y_eur_swap_Apr14()
+
+    single_curve_bootstrap_sonia_Apr14()
