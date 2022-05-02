@@ -567,6 +567,7 @@ def _bootstrap_estr_Apr14():
                 ]]
 
     # discount curve
+    # settlement: T+2
     estr_curve_c = PiecewiseLogLinearDiscount(Date(20, 4, 2022), helpers, Actual365Fixed())
     estr_curve_c.enableExtrapolation()
 
@@ -699,13 +700,13 @@ def _single_curve_bootstrap_sonia_Apr14():
                 ]]
 
     # discount curve
-    curve_start_date = sonia.fixingCalendar().advance(Settings.instance().evaluationDate, sonia.fixingDays(),
-                                                      Days)
+    # settlement: T+0
+    curve_start_date = sonia.fixingCalendar().advance(Settings.instance().evaluationDate, 0, Days)
     print('curve_start_date: ', curve_start_date)
-    euribor6m_curve = PiecewiseLogLinearDiscount(curve_start_date, helpers, Actual365Fixed())
-    euribor6m_curve.enableExtrapolation()
+    sonia_curve = PiecewiseLogLinearDiscount(curve_start_date, helpers, Actual365Fixed())
+    sonia_curve.enableExtrapolation()
 
-    return euribor6m_curve
+    return sonia_curve
 
 
 def single_curve_bootstrap_sonia_Apr14():
@@ -727,6 +728,166 @@ def single_curve_bootstrap_sonia_Apr14():
     pd.DataFrame(euribor6m_discounts_instr).to_clipboard()
 
 
+# CAD Apr 14
+
+def _bootstrap_cdor3m_Apr14(discount_curve_handle=None):
+    Settings.instance().evaluationDate = Date(14, 4, 2022)
+
+    cdor3m = Cdor(Period(3, Months))
+    print(cdor3m, ': fixing days: ', cdor3m.fixingDays())
+    settlementDay = 0
+
+    # deposit with spot 3m cdor rate
+    helpers = [DepositRateHelper(QuoteHandle(SimpleQuote(1.5175 / 100)),
+                                 Period(3, Months), settlementDay, cdor3m.fixingCalendar(), ModifiedFollowing, False,
+                                 cdor3m.dayCounter())]
+
+    # 3m cdor Futures
+    helpers += [FuturesRateHelper(QuoteHandle(SimpleQuote(100 - rate)),
+                                  start, end, Actual365Fixed())
+                for (start, end, rate) in [
+                    (Date(15, 6, 2022), Date(21, 9, 2022), 2.049427292),
+                    (Date(21, 9, 2022), Date(21, 12, 2022), 2.688007949),
+                    (Date(21, 12, 2022), Date(15, 3, 2023), 3.011173934),
+                    (Date(15, 3, 2023), Date(21, 6, 2023), 3.188547234),
+                    (Date(21, 6, 2023), Date(20, 9, 2023), 3.255396987),
+                    (Date(20, 9, 2023), Date(20, 12, 2023), 3.276738988)
+                ]]
+
+    # swaps
+    spread = QuoteHandle()  # spread = 0
+    fwdStart = Period(0, Days)
+
+    def swapRateHelper(rate, tenor, discount_curve_handle):
+        if discount_curve_handle is None:
+            return SwapRateHelper(QuoteHandle(SimpleQuote(rate / 100)), Period(tenor, Years), cdor3m.fixingCalendar(),
+                                  Semiannual, ModifiedFollowing, Actual365Fixed(), cdor3m, spread, fwdStart)
+        else:
+            return SwapRateHelper(QuoteHandle(SimpleQuote(rate / 100)), Period(tenor, Years), cdor3m.fixingCalendar(),
+                                  Semiannual, ModifiedFollowing, Actual365Fixed(), cdor3m, spread, fwdStart,
+                                  discount_curve_handle)
+
+    helpers += [swapRateHelper(rate, tenor, discount_curve_handle)
+                for tenor, rate in [
+                    (2, 2.836238503), (3, 2.944818497), (4, 2.972025514), (5, 2.996644974), (6, 3.025250077),
+                    (7, 3.068000078), (8, 3.121999979), (9, 3.172099948), (10, 3.211602926), (12, 3.264999986),
+                    (15, 3.340399981), (20, 3.356899977), (25, 3.278999925), (30, 3.164999962)
+                ]]
+
+    # discount curve
+    curve_start_date = cdor3m.fixingCalendar().advance(Settings.instance().evaluationDate, settlementDay, Days)
+    print('curve_start_date: ', curve_start_date)
+    cdor3m_curve = PiecewiseLogLinearDiscount(curve_start_date, helpers, Actual365Fixed())
+    cdor3m_curve.enableExtrapolation()
+
+    return cdor3m_curve
+
+
+def bootstrap_cdor3m_Apr14():
+    cdor3m_curve = _bootstrap_cdor3m_Apr14()
+    print('reference date: ', cdor3m_curve.referenceDate())
+
+    # plot forward curve
+    # today = cdor3m_curve.referenceDate()
+    # end = today + Period(5, Years)
+    # dates = [Date(serial) for serial in range(today.serialNumber(), end.serialNumber() + 1)]
+    # cdor3m_rates = [cdor3m_curve.forwardRate(d, TARGET().advance(d, 3, Months), Actual360(), Simple).rate() * 100
+    #                  for d in dates]
+    # plt.plot(cdor3m_rates)
+    # plt.show()
+
+    # discount factors
+    cdor3m_discounts_instr = [(d, cdor3m_curve.discount(d)) for d in cdor3m_curve.dates()]
+    print(pd.DataFrame(cdor3m_discounts_instr))
+    pd.DataFrame(cdor3m_discounts_instr).to_clipboard()
+
+
+def _bootstrap_corra_Apr14():
+    # evaluation date = Apr14
+    # curve start date = Apr14
+    # deposit / swap settlement: T+1
+
+    Settings.instance().evaluationDate = Date(14, 4, 2022)
+
+    corra = OvernightIndex('Corra', 0, CADCurrency(), Canada(), Actual365Fixed())
+    settlementDay = 1
+
+    print(corra, ': fixing days: ', corra.fixingDays())
+    print(corra, ': fixing calendar: ', corra.fixingCalendar())
+    print(corra, ': day convention: ', corra.businessDayConvention())
+
+    # deposit with overnight corra rate
+    helpers = [
+        DepositRateHelper(QuoteHandle(SimpleQuote(rate / 100)),
+                          Period(1, Days), fixingDays,
+                          corra.fixingCalendar(), Following, False, Actual365Fixed())
+        for rate, fixingDays in [(0.95, 1)]
+    ]
+
+    # swaps
+    # annual payment
+    helpers += [OISRateHelper(settlementDay, Period(*tenor),
+                              QuoteHandle(SimpleQuote(rate / 100)), corra, paymentFrequency=Annual)
+                for rate, tenor in [
+                    (0.935, (1, Weeks)),
+                    (0.8443, (2, Weeks)),
+                    (0.9400, (1, Months)), (1.0730, (2, Months)), (1.1900, (3, Months)),
+                    (1.3520, (4, Months)), (1.4660, (5, Months)), (1.5930, (6, Months)), (1.9110, (9, Months)),
+                    (2.1140, (1, Years))
+                ]]
+    # semi-annual payment
+    helpers += [OISRateHelper(settlementDay, Period(*tenor),
+                              QuoteHandle(SimpleQuote(rate / 100)), corra, paymentFrequency=Semiannual)
+                for rate, tenor in [
+                    (2.5250, (2, Years)), (2.6340, (3, Years)), (2.6680, (4, Years)),
+                    (2.6880, (5, Years)), (2.7580, (7, Years)), (2.9016, (10, Years)),
+                    (2.9550, (12, Years)), (3.0304, (15, Years)),
+                    (3.0469, (20, Years)), (2.9690, (25, Years)), (2.8550, (30, Years))
+                ]]
+
+    # discount curve
+    # settlement: T+1
+    curve_start_date = corra.fixingCalendar().advance(Settings.instance().evaluationDate, settlementDay, Days)
+    corra_curve_c = PiecewiseLogLinearDiscount(curve_start_date, helpers, Actual365Fixed())
+    corra_curve_c.enableExtrapolation()
+
+    return corra_curve_c
+
+
+def bootstrap_corra_Apr14():
+    corra_curve_c = _bootstrap_corra_Apr14()
+    print('reference date: ', corra_curve_c.referenceDate())
+
+    reference_date = corra_curve_c.referenceDate()
+    print(reference_date)
+
+    # discount factors
+    corra_discounts_instr = [(d, corra_curve_c.discount(d)) for d in corra_curve_c.dates()]
+    print(pd.DataFrame(corra_discounts_instr))
+    pd.DataFrame(corra_discounts_instr).to_clipboard()
+
+
+def _dual_curve_bootstrap_cad_Apr14():
+    corra_curve = _bootstrap_corra_Apr14()
+    discount_curve_handle = RelinkableYieldTermStructureHandle()
+    discount_curve_handle.linkTo(corra_curve)
+    cdor3m_curve = _bootstrap_cdor3m_Apr14(discount_curve_handle)
+
+    return cdor3m_curve
+
+
+def dual_curve_bootstrap_cad_Apr14():
+    cdor3m_curve = _dual_curve_bootstrap_cad_Apr14()
+    print('reference date: ', cdor3m_curve.referenceDate())
+
+    # discount factors
+    print('====== cdor3m_curve discount factors (corra ois discounted) Apr14 =====')
+    cdor3m_discounts_instr = [(d, cdor3m_curve.discount(d)) for d in cdor3m_curve.dates()]
+    print(pd.DataFrame(cdor3m_discounts_instr))
+    pd.DataFrame(cdor3m_discounts_instr).to_clipboard()
+    print()
+
+
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     # bootstrap_sofr_Feb18()
@@ -746,4 +907,8 @@ if __name__ == '__main__':
     # dual_curve_bootstrap_eur_Apr14()
     # price_13y_eur_swap_Apr14()
 
-    single_curve_bootstrap_sonia_Apr14()
+    # single_curve_bootstrap_sonia_Apr14()
+
+    bootstrap_corra_Apr14()
+    bootstrap_cdor3m_Apr14()
+    dual_curve_bootstrap_cad_Apr14()
